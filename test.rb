@@ -10,119 +10,118 @@ require 'csv'
 # https://www.petsonic.com/virbac/ - 65
 # https://www.petsonic.com/royal-canin/ - 149
 
-def fetchDataAndWriteToFile(fileName, url)
-  http = Curl.get(url)
+class Web_scraping
+    attr_reader :all_product_urls_of_category
+    attr_reader :goods
 
-  puts "Скачиваем страницу #{url}..."
-
-  doc = Nokogiri::HTML(http.body_str)
-
-  puts "Парсим скачанную страницу..."
-
-  quantityPagesText = doc.xpath('//div[contains(@id, "pagination_bottom")]//@href') 
-
-  puts "Находим общее количество страниц категории с товарами..."
-
-  urlsProductsOfPage = doc.xpath('//a[contains(@class, "product_img_link")]//@href')
-
-  puts "Находим адреса страниц товаров на 1 странице..."
-
-  allUrlsProductsOfCategory = [];
-
-  puts "Добавляем их в массив, который будет хранить все адреса страниц товаров заданной категории..."
-
-  urlsProductsOfPage.each do |urlProduct| 
-    allUrlsProductsOfCategory.push(urlProduct)
-  end
-
-  puts "Проверяем если общее количество страниц содержит больше чем 1"
-
-  if quantityPagesText[-2]
-    totalQuantityPagesMatch = "#{quantityPagesText[-2]}".match(/[0-9]/)
-    totalQuantityPages = "#{totalQuantityPagesMatch}".to_i
-
-    puts "Страница заданной категории содержит #{totalQuantityPages} страниц"
-
-    for i in 2..totalQuantityPages do
-      puts "В скрипте используется sleep 3, что означает приостановление его выполнения на 3 секунды, чтобы не привлекать к себе внимание администраторов сайта!"
-
-      sleep 3
-
-      puts "Скачиваем страницу #{url}?p=#{i}..."
-
-      http = Curl.get("#{url}?p=#{i}") 
-
-      puts "Парсим скачанную страницу..."
-
-      doc = Nokogiri::HTML(http.body_str)
-
-      urlsProductsOfPage = doc.xpath('//a[contains(@class, "product_img_link")]//@href')
-
-      puts "Находим адреса страниц товаров на #{i} странице и добавляем к массиву со всеми адресами товаров..."
-
-      urlsProductsOfPage.each do |urlProduct| 
-        allUrlsProductsOfCategory.push(urlProduct)
-      end
-    end
-  else 
-    puts "Страница заданной категории содержит 1 страницу..."
-  end
-
-  def fetchDataAndPushToArray(array, url)
-    puts "Скачиваем страницу #{url}..."
-
-    http = Curl.get(url)
-
-    puts "Парсим скачанную страницу..."
-
-    doc = Nokogiri::HTML(http.body_str)
-
-    puts "Отбираем название, цену, размер и изображение товара..."
-
-    productName = "#{doc.xpath('//h1//text()')}".strip
-    productProps = doc.xpath('//ul[contains(@class, "attribute_radio_list")]//span//text()')
-    urlsImages = doc.xpath('//ul[contains(@id, "thumbs_list_frame")]//@href')
-
-    productSizes = [];
-    productPrices = [];
-
-    for i in 0..productProps.length - 1 do
-      if i.even?
-        productSizes.push(productProps[i])
-      else 
-        productPrices.push(productProps[i])
-      end
+    def initialize(file_name, url) 
+        @all_product_urls_of_category = []
+        @file_name = file_name
+        @url = url
+        @goods = [['Name', 'Price', 'Image']];
     end
 
-    puts "Корректируем полученные данные и добавляем в массив, которые будут записаны в файл..."
-
-    productNamesWithSize = productSizes.map { |size| "#{productName} - #{size}"}
-    productPricesWithoutCurrency = productPrices.map { |price| "#{price}".gsub! /[^0-9.]/, '' }
-    urlsImagesWithRegExp = urlsImages.map { |urlImg| "#{urlImg}".gsub! 'thickbox', 'large' }
-
-    for i in 0..productSizes.length - 1 do
-      item = [productNamesWithSize[i], productPricesWithoutCurrency[i], urlsImagesWithRegExp.join(', ')]
-      array.push(item)
+    def get_parsed_page(url)
+        http = Curl.get(url)
+        Nokogiri::HTML(http.body_str)
     end
-  end
 
-  goods = [['Name', 'Price', 'Image']];
+    def add_in_all_product_urls_of_category_array(page_urls, all_urls_of_category)
+        page_urls.each do |url_product| 
+            all_urls_of_category.push(url_product)
+        end
+    end
 
-  puts "Далее проходимся по циклу в массиве с адресами товаров..."
+    def geе_initial_data_from_the_requested_page
+        doc = get_parsed_page(@url)
+        @quantity_of_pages = doc.xpath('//div[contains(@id, "pagination_bottom")]//@href') 
+        @product_urls_of_the_requested_page = doc.xpath('//a[contains(@class, "product_img_link")]//@href')
+        add_in_all_product_urls_of_category_array(@product_urls_of_the_requested_page, @all_product_urls_of_category)
+    end
 
-  for i in 0..allUrlsProductsOfCategory.length - 1 do
-    puts "В скрипте используется sleep 3, что означает приостановление его выполнения на 3 секунды, чтобы не привлекать к себе внимание администраторов сайта!"
+    def get_product_urls_on_other_pages_if_they_exist
+        if @quantity_of_pages[-2]
+            total_quantity_pages_match = "#{@quantity_of_pages[-2]}".match(/[0-9]+/) 
+            total_quantity_pages = "#{total_quantity_pages_match}".to_i
 
-    sleep 3
+            p "Страница заданной категории содержит #{total_quantity_pages} страницы..."
+            p "Скачиваем, парсим все страницы и получаем от них ссылки на страницы товаров..."
+    
+            for i in 2..total_quantity_pages do
+                doc = get_parsed_page("#{@url}?p=#{i}")
+                @product_urls_of_the_requested_page = doc.xpath('//a[contains(@class, "product_img_link")]//@href')
+                add_in_all_product_urls_of_category_array(@product_urls_of_the_requested_page, @all_product_urls_of_category)
+            end
+        else 
+            p "Страница заданной категории содержит 1 страницу..."
+        end
+    end
 
-    fetchDataAndPushToArray(goods, "#{allUrlsProductsOfCategory[i]}".to_s)
-  end
+    def get_payload(array, page)
+        doc = Nokogiri::HTML(page)
 
-  puts "Записываем данные из массива в #{fileName} файл..."
+        product_name = "#{doc.xpath('//h1//text()')}".strip
+        product_props = doc.xpath('//ul[contains(@class, "attribute_radio_list")]//span[@class="radio_label" or @class="price_comb"]//text()')
+        urls_images = doc.xpath('//ul[contains(@id, "thumbs_list_frame")]//@href')
 
-  File.write(fileName, goods.map(&:to_csv).join)
+        product_sizes = [];
+        product_prices = [];
 
-  puts "Запись успешно завершена."
+        for i in 0..product_props.length - 1 do
+            if i.even?
+                product_sizes.push(product_props[i])
+            else 
+                product_prices.push(product_props[i])
+            end
+        end
+
+        product_name_with_size = product_sizes.map { |size| "#{product_name} - #{size}"}
+        product_prices_without_currency = product_prices.map { |price| "#{price}".gsub! /[^0-9.]/, '' }
+        urls_images_with_reg_exp = urls_images.map { |urlImg| "#{urlImg}".gsub! 'thickbox', 'large' }
+
+        for i in 0..product_sizes.length - 1 do
+            item = [product_name_with_size[i], product_prices_without_currency[i], urls_images_with_reg_exp.join(', ')]
+            array.push(item)
+        end
+    end
+
+    def fetch_data_from_each_page_and_write_to_file
+        responses = {}
+
+        m = Curl::Multi.new
+
+        @all_product_urls_of_category.each do |url|
+            responses[url] = ""
+            c = Curl::Easy.new(url) do |curl|
+                curl.follow_location = true
+                curl.on_body{|data| responses[url] << data; data.size } 
+            end
+            
+            m.add(c)
+        end
+
+        m.perform
+
+        @all_product_urls_of_category.each do|url|
+            get_payload(@goods, responses[url])
+        end
+
+        File.write(@file_name, @goods.map(&:to_csv).join)
+    end
 end
 
-fetchDataAndWriteToFile('snacks-piel-prensada.csv', 'https://www.petsonic.com/snacks-piel-prensada/')
+p "Enter a file name:"
+file_name = gets.chomp
+p "Enter a link to the category page"
+page_link = gets.chomp
+
+instance = Web_scraping.new("#{file_name}.csv", page_link)
+p "Скачиваем и парсим страницу #{page_link}..."
+p "Получаем первоначальные данные с запрашиваемой категории: общее количество страниц со всеми товарами, адреса страниц товаров на 1 странице..."
+instance.geе_initial_data_from_the_requested_page
+p "Проверяем если общее количество страниц содержит больше чем 1..."
+instance.get_product_urls_on_other_pages_if_they_exist
+p "После получения всех ссылок на товары заданной категории, начинаем скачивать и парсить их страницы..."
+p "Отбираем название, цену, размер и изображение товара..."
+p "Корректируем полученные данные и записываем в файл #{file_name}.csv..."
+instance.fetch_data_from_each_page_and_write_to_file
